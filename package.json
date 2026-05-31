@@ -1,15 +1,17 @@
 {
-  "name": "gsplat-kg",
+  "name": "knowledge-graph-application",
   "private": true,
-  "version": "1.0.0",
-  "description": "Knowledge graph application for Gaussian Splatting research papers",
+  "version": "2.0.0",
+  "description": "Generic context-bucket knowledge graph system (Python/CrewAI/LangGraph backend + React frontend)",
   "scripts": {
-    "dev": "pnpm --parallel --filter api --filter web dev",
-    "build": "pnpm --filter api build && pnpm --filter web build",
-    "db:push": "pnpm --filter api db:push",
-    "db:studio": "pnpm --filter api db:studio"
+    "infra:up": "docker-compose up -d",
+    "infra:down": "docker-compose down",
+    "server": "cd apps/server && uvicorn app.main:app --reload --port 3000",
+    "server:install": "cd apps/server && pip install -r requirements.txt",
+    "web": "pnpm --filter web dev",
+    "web:install": "pnpm --filter web install"
   },
-  "keywords": ["knowledge-graph", "ai-agents", "gaussian-splatting"],
+  "keywords": ["knowledge-graph", "ai-agents", "crewai", "langgraph", "neo4j", "context-buckets"],
   "author": "",
   "license": "MIT",
   "engines": {

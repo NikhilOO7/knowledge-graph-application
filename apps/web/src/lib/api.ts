@@ -1,4 +1,14 @@
-import type { Paper, Node, Edge, GraphStats, Subgraph } from 'shared';
+import type {
+  Bucket,
+  DocumentItem,
+  GraphEdge,
+  GraphNode,
+  GraphStats,
+  IngestResponse,
+  JobStatus,
+  NodeDetail,
+  QAResponse,
+} from './types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -10,76 +20,85 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
       ...options?.headers,
     },
   });
-
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || `HTTP ${response.status}`);
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || error.error || `HTTP ${response.status}`);
   }
-
   return response.json();
 }
 
 export const api = {
-  papers: {
-    list: (limit = 20, offset = 0) =>
-      fetchAPI<{ papers: Paper[]; pagination: { limit: number; offset: number } }>(
-        `/api/papers?limit=${limit}&offset=${offset}`
-      ),
-    processing: () =>
-      fetchAPI<{ papers: Paper[] }>('/api/papers/processing'),
-    get: (id: string) => fetchAPI<Paper>(`/api/papers/${id}`),
-    create: (data: Partial<Paper>) =>
-      fetchAPI<Paper>('/api/papers', {
+  buckets: {
+    list: () => fetchAPI<{ buckets: Bucket[] }>('/api/buckets'),
+    get: (id: string) => fetchAPI<Bucket>(`/api/buckets/${id}`),
+    create: (name: string, description?: string) =>
+      fetchAPI<Bucket>('/api/buckets', {
         method: 'POST',
-        body: JSON.stringify(data),
+        body: JSON.stringify({ name, description }),
       }),
+    remove: (id: string) =>
+      fetchAPI<{ deleted: string }>(`/api/buckets/${id}`, { method: 'DELETE' }),
+  },
+
+  documents: {
+    list: (bucketId?: string, limit = 20) => {
+      const qp = new URLSearchParams();
+      if (bucketId) qp.set('bucket_id', bucketId);
+      qp.set('limit', String(limit));
+      return fetchAPI<{ documents: DocumentItem[] }>(`/api/documents?${qp}`);
+    },
+    processing: () => fetchAPI<{ documents: DocumentItem[] }>('/api/documents/processing'),
     process: (id: string) =>
-      fetchAPI<{ message: string; paperId: string; status: string }>(
-        `/api/papers/${id}/process`,
+      fetchAPI<{ job_id: string; document_id: string; status: string }>(
+        `/api/documents/${id}/process`,
         { method: 'POST' }
       ),
   },
 
   graph: {
-    nodes: (params?: { type?: string; search?: string; limit?: number; offset?: number }) => {
-      const queryParams = new URLSearchParams();
-      if (params?.type) queryParams.set('type', params.type);
-      if (params?.search) queryParams.set('search', params.search);
-      if (params?.limit) queryParams.set('limit', params.limit.toString());
-      if (params?.offset) queryParams.set('offset', params.offset.toString());
-
-      return fetchAPI<{ nodes: Node[]; pagination: { limit: number; offset: number } }>(
-        `/api/graph/nodes?${queryParams}`
-      );
+    nodes: (bucketId: string, params?: { type?: string; search?: string; limit?: number }) => {
+      const qp = new URLSearchParams({ bucket_id: bucketId });
+      if (params?.type) qp.set('type', params.type);
+      if (params?.search) qp.set('search', params.search);
+      if (params?.limit) qp.set('limit', String(params.limit));
+      return fetchAPI<{ nodes: GraphNode[] }>(`/api/graph/nodes?${qp}`);
     },
-    node: (id: string) =>
-      fetchAPI<{ node: Node; outgoingEdges: Edge[]; incomingEdges: Edge[] }>(
-        `/api/graph/nodes/${id}`
-      ),
-    edges: (params?: { type?: string; limit?: number; offset?: number }) => {
-      const queryParams = new URLSearchParams();
-      if (params?.type) queryParams.set('type', params.type);
-      if (params?.limit) queryParams.set('limit', params.limit.toString());
-      if (params?.offset) queryParams.set('offset', params.offset.toString());
-
-      return fetchAPI<{ edges: Edge[]; pagination: { limit: number; offset: number } }>(
-        `/api/graph/edges?${queryParams}`
-      );
+    node: (id: string) => fetchAPI<NodeDetail>(`/api/graph/nodes/${id}`),
+    edges: (bucketId: string, params?: { type?: string; limit?: number }) => {
+      const qp = new URLSearchParams({ bucket_id: bucketId });
+      if (params?.type) qp.set('type', params.type);
+      if (params?.limit) qp.set('limit', String(params.limit));
+      return fetchAPI<{ edges: GraphEdge[] }>(`/api/graph/edges?${qp}`);
     },
-    subgraph: (nodeId: string, depth = 1) =>
-      fetchAPI<Subgraph>(`/api/graph/subgraph?nodeId=${nodeId}&depth=${depth}`),
-    stats: () => fetchAPI<GraphStats>('/api/graph/stats'),
+    stats: (bucketId: string) => fetchAPI<GraphStats>(`/api/graph/stats?bucket_id=${bucketId}`),
   },
 
   ingest: {
-    arxiv: (arxivId: string, autoProcess = true) =>
-      fetchAPI<{ jobId: string; status: string }>('/api/ingest/arxiv', {
+    upload: (file: File, bucketId?: string) => {
+      const form = new FormData();
+      form.append('file', file);
+      if (bucketId) form.append('bucket_id', bucketId);
+      form.append('auto_process', 'true');
+      return fetch(`${API_URL}/api/ingest/upload`, { method: 'POST', body: form }).then(
+        async (r) => {
+          if (!r.ok) throw new Error((await r.json()).detail || `HTTP ${r.status}`);
+          return r.json() as Promise<IngestResponse>;
+        }
+      );
+    },
+    text: (title: string, text: string, bucketId?: string) =>
+      fetchAPI<IngestResponse>('/api/ingest/text', {
         method: 'POST',
-        body: JSON.stringify({ arxivId, autoProcess }),
+        body: JSON.stringify({ title, text, bucket_id: bucketId, auto_process: true }),
       }),
-    status: (jobId: string) =>
-      fetchAPI<{ status: string; paperId?: string; error?: string }>(
-        `/api/ingest/status/${jobId}`
-      ),
+    status: (jobId: string) => fetchAPI<JobStatus>(`/api/ingest/status/${jobId}`),
+  },
+
+  qa: {
+    ask: (bucketId: string, question: string) =>
+      fetchAPI<QAResponse>('/api/qa', {
+        method: 'POST',
+        body: JSON.stringify({ bucket_id: bucketId, question }),
+      }),
   },
 };
