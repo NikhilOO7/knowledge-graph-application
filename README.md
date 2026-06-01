@@ -1,107 +1,105 @@
 # Knowledge Graph — Context Bucket System
 
-A full-stack system that turns **any uploaded document** into a queryable knowledge graph using a multi-agent AI pipeline. It reads documents, infers a domain ontology, extracts entities and relationships, and stores them in a graph database.
+A full-stack system that turns **any uploaded document** into a queryable **knowledge graph** using a multi-agent AI pipeline. It reads a document, infers a domain ontology, extracts entities and the relationships between them, and stores the result in a graph database.
 
-The graph is organised into **context buckets**. When you upload a document, the system detects whether its context already exists in memory: if so it **appends** the new knowledge into that bucket's graph; if not it **creates a new bucket**. From the UI you choose which context bucket's knowledge graph to view, explore, and query.
+The graph is organised into **context buckets**. When you upload a document, the system detects whether its subject already exists in memory: if so it **appends** the newly-extracted knowledge into that bucket's graph (merging/deduping entities); if not, it **creates a new bucket**. From the UI you pick which bucket's graph to explore, visualise, and ask questions about.
 
----
-
-## Core idea: context buckets
-
-A **context bucket** is a named container for one knowledge graph built around a subject/corpus. Each bucket has its own entities, relationships, inferred ontology, and a *context signature* (an embedding + summary) used to decide where new uploads belong.
-
-```
-Upload document
-      │
-      ▼
- Summarise + embed  ──►  context signature
-      │
-      ▼
- Context-Router agent: compare signature to existing buckets
-      │
-   ┌──┴───────────────┐
-match ≥ threshold     no match
-   │                   │
-   ▼                   ▼
- Append graph to     Create new bucket
- existing bucket     and seed graph
-   └──────┬────────────┘
-          ▼
-  User picks a bucket in the UI to explore its graph
-```
-
-Uploading several documents on the same subject keeps enriching **one coherent graph** (entities dedup/merge) instead of producing fragmented, disconnected graphs.
+> One coherent graph per subject — uploading several documents about the same topic keeps enriching the same graph instead of producing fragmented, disconnected ones.
 
 ---
 
-## Architecture
+## High-level design
 
-```
- React (web, TypeScript)
-        │  REST
-        ▼
- FastAPI backend (Python)
-        ├── LangGraph    orchestrates the ingestion pipeline (state machine)
-        ├── CrewAI       multi-agent extraction crew (extractor→resolver→validator)
-        ├── PostgreSQL   buckets, documents, jobs, provenance
-        └── Neo4j        the knowledge graph itself (entities + relationships, per bucket)
-```
+![High-level architecture](docs/architecture.svg)
 
-### Ingestion pipeline (LangGraph)
+The system is split into four cooperating layers:
+
+| Layer | Tech | Responsibility |
+|-------|------|----------------|
+| **Frontend** | React, Vite, TailwindCSS, React Flow | Bucket selector, graph explorer, upload, natural-language Q&A |
+| **Backend** | FastAPI (Python) | REST API + orchestration |
+| **Orchestration** | **LangGraph** + **CrewAI** | LangGraph runs the ingestion state machine; CrewAI runs the extraction crew |
+| **Storage** | **PostgreSQL** + **Neo4j** | Postgres for operational data; Neo4j for the graph itself |
+
+### Why two databases?
+- **Neo4j** stores the knowledge graph — native traversal and Cypher make multi-hop queries (neighbourhoods, sub-graphs) natural and fast. Every node and relationship carries a `bucket_id`, so buckets are cleanly isolated.
+- **PostgreSQL** stores relational/operational data: buckets, documents, job status, and edge → source-text provenance.
+
+### Why LangGraph *and* CrewAI?
+They work at different levels. **LangGraph** owns the overall pipeline as an explicit, observable, retryable state machine. **CrewAI** is the multi-agent *unit* that does the actual extraction inside one step of that machine. Orchestration vs. the agent team.
+
+---
+
+## How a document becomes a graph
+
+![Context-bucket routing](docs/bucket-routing.svg)
+
+The ingestion pipeline is a **LangGraph `StateGraph`**:
 
 ```
 prepare ─► route ─► ontology ─► extract ─► finalize
 ```
 
-| Step       | What happens | Agent / component |
-|------------|--------------|-------------------|
-| `prepare`  | Extract text, summarise, embed → context signature | Summariser/Embedding tool |
-| `route`    | Append to an existing bucket or create a new one | **Context-Router agent** |
-| `ontology` | Infer/extend the bucket's entity & relationship types | **Ontology agent** |
-| `extract`  | Per chunk: extract → resolve → validate, then persist to Neo4j | **CrewAI extraction crew** |
-| `finalize` | Roll signature into the bucket, refresh ontology + counts | persistence |
+| Step | What happens | Agent / component |
+|------|--------------|-------------------|
+| `prepare`  | Extract text (PDF/text), summarise, embed → a *context signature*; chunk the text | Summarizer / Embedding tool |
+| `route`    | Compare the signature to existing buckets; append to the best match or create a new bucket | **Context-Router agent** |
+| `ontology` | Infer / extend the bucket's entity & relationship **types** from the document | **Ontology agent** |
+| `extract`  | Per chunk: extract → resolve/dedup → validate, then persist to Neo4j + provenance to Postgres | **CrewAI crew** |
+| `finalize` | Roll the document's signature into the bucket, refresh ontology + cached counts | persistence |
 
-CrewAI runs *inside* the `extract` step; LangGraph owns the overall, observable, retryable state machine.
+### The agents
 
-### Agents
+- **Context-Router** — decides *append vs. create* using embedding cosine similarity against each bucket's signature, with an LLM tie-breaker for borderline cases and LLM naming for new buckets.
+- **Ontology / Schema** — infers domain-appropriate entity and relationship types per bucket (no hardcoded domain), always extending, never discarding, the bucket's existing ontology.
+- **CrewAI Extraction Crew** — three cooperating agents:
+  - *Extractor* — high-recall entity & candidate-relationship extraction.
+  - *Resolver* — canonicalises mentions and dedups against entities already in the bucket (via a tool that queries the live graph).
+  - *Validator* — drops ill-typed or low-confidence relationships.
+- **Graph-QA** — GraphRAG-style: retrieves relevant relationships from the selected bucket and answers a natural-language question grounded in them.
 
-- **Extractor / Resolver / Validator** (CrewAI crew) — high-recall extraction, canonicalisation + dedup against the bucket, then type/logic validation.
-- **Context-Router** — decides append-vs-create using embedding cosine similarity (+ an LLM tie-breaker for borderline cases).
-- **Ontology / Schema** — infers domain-appropriate entity & relationship types per bucket (no hardcoded domain).
-- **Graph-QA** — GraphRAG-style: answers natural-language questions grounded in a bucket's relationships.
+> Graceful degradation: with no LLM key, embeddings fall back to a deterministic vector so routing still works; if CrewAI is unavailable, a direct-LLM path implements the same extract → resolve → validate logic.
+
+---
+
+## Data model
+
+### PostgreSQL (operational)
+- **`buckets`** — `name, description, entity_types[], relationship_types[], signature_vector, signature_summary, node_count, edge_count`
+- **`documents`** — `bucket_id, title, source_type, raw_text, processing_status, processing_progress`
+- **`sources`** — provenance: `edge_id` (Neo4j relationship), `document_id, section, extracted_text`
+
+### Neo4j (the graph)
+```cypher
+(:Entity {id, bucket_id, type, name, normalized_name, description})
+(:Entity)-[:REL {id, bucket_id, type, confidence}]->(:Entity)
+```
+- Entities dedup on `(bucket_id, normalized_name)` via `MERGE` — same concept across documents merges into one node.
+- A single `:REL` type carries a `type` **property**, so arbitrary, ontology-inferred relationship names are stored safely.
 
 ---
 
 ## Tech stack
 
-**Backend (Python)** — FastAPI, LangGraph, CrewAI, SQLAlchemy (PostgreSQL), Neo4j Python driver, OpenAI-compatible LLM client (OpenAI or local Ollama), pypdf.
+**Backend** — FastAPI, LangGraph, CrewAI, SQLAlchemy (PostgreSQL), Neo4j Python driver, OpenAI-compatible LLM client (OpenAI **or** local Ollama), pypdf.
 
-**Frontend (TypeScript)** — React 18, Vite, TailwindCSS, React Router, React Query, React Flow.
+**Frontend** — React 18, Vite, TailwindCSS, React Router, React Query, React Flow.
 
-**Infrastructure** — Docker Compose (PostgreSQL + Neo4j), pnpm for the web app, pip for the server.
-
-### Why two databases?
-- **PostgreSQL** holds operational/relational data: buckets, documents, job status, and edge → source provenance.
-- **Neo4j** holds the graph itself — native traversal and Cypher make multi-hop graph queries natural, and buckets are isolated via a `bucket_id` property on every node and relationship.
+**Infrastructure** — Docker Compose (PostgreSQL + Neo4j), pnpm (web), pip (server).
 
 ---
 
-## Prerequisites
+## Getting started
 
-- Python >= 3.10
-- Node.js >= 18 and pnpm >= 8
+### Prerequisites
+- Python ≥ 3.10
+- Node.js ≥ 18 and pnpm ≥ 8
 - Docker + Docker Compose
-- An LLM provider: an OpenAI API key **or** a local [Ollama](https://ollama.com) install
-
-> The system degrades gracefully without an LLM key (deterministic hashing-based context routing still works), but extraction quality requires a configured provider.
-
----
-
-## Setup
+- An LLM provider: an OpenAI API key **or** a local [Ollama](https://ollama.com)
 
 ### 1. Start the databases
 ```bash
-docker-compose up -d        # PostgreSQL on :5433, Neo4j on :7687 (browser :7474)
+docker-compose up -d        # PostgreSQL :5433 · Neo4j :7687 (browser :7474)
 ```
 
 ### 2. Backend (FastAPI)
@@ -109,58 +107,67 @@ docker-compose up -d        # PostgreSQL on :5433, Neo4j on :7687 (browser :7474
 cd apps/server
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env         # then edit OPENAI_API_KEY (or set LLM_PROVIDER=ollama)
+cp .env.example .env          # set OPENAI_API_KEY, or LLM_PROVIDER=ollama
 uvicorn app.main:app --reload --port 3000
 ```
-Tables and Neo4j constraints are created automatically on startup.
+Postgres tables and Neo4j constraints are created automatically on startup.
 
 ### 3. Frontend (React)
 ```bash
 pnpm install
-cp apps/web/.env.example apps/web/.env   # VITE_API_URL=http://localhost:3000
+cp apps/web/.env.example apps/web/.env    # VITE_API_URL=http://localhost:3000
 pnpm --filter web dev
 ```
 
-App: http://localhost:5173 · API: http://localhost:3000 · Neo4j browser: http://localhost:7474
+App → http://localhost:5173 · API → http://localhost:3000 · Neo4j browser → http://localhost:7474
 
----
-
-## Quick start
-
+### First run
 1. Open **Upload**, drop a PDF or paste text, leave the target on **Auto-route**.
-2. Watch the job status — it reports whether the document **created** a new bucket or was **appended** to an existing one, plus how many nodes/edges were extracted.
+2. The job status reports whether the document **created** a new bucket or was **appended** to one, plus how many nodes/edges were extracted.
 3. Use the **bucket selector** (top bar) to choose a bucket.
-4. Open **Explorer** to see that bucket's graph, or **Ask** to query it in natural language.
-5. Upload another document on the same subject — it merges into the same bucket and enriches the graph.
+4. Open **Explorer** to see the graph, or **Ask** to query it.
+5. Upload another document on the same topic — it merges into the same bucket.
 
 ---
 
 ## API reference
 
 ### Buckets
-- `GET /api/buckets` — list buckets with counts and inferred ontology
-- `POST /api/buckets` — create a bucket
-- `GET /api/buckets/{id}` — bucket detail
-- `DELETE /api/buckets/{id}` — delete a bucket and its graph
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/buckets` | List buckets with counts + inferred ontology |
+| POST | `/api/buckets` | Create a bucket |
+| GET | `/api/buckets/{id}` | Bucket detail |
+| DELETE | `/api/buckets/{id}` | Delete a bucket and its graph |
 
 ### Documents
-- `GET /api/documents?bucket_id=…` — list documents
-- `GET /api/documents/processing` — documents currently processing
-- `POST /api/documents/{id}/process` — (re)run the pipeline
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/documents?bucket_id=…` | List documents |
+| GET | `/api/documents/processing` | Documents currently processing |
+| POST | `/api/documents/{id}/process` | (Re)run the pipeline |
 
 ### Ingestion
-- `POST /api/ingest/upload` — upload a file (PDF/text), auto-routed or forced to a bucket
-- `POST /api/ingest/text` — ingest raw text
-- `POST /api/ingest/bulk` — upload multiple files
-- `GET /api/ingest/status/{job_id}` — job status (stage, progress, bucket decision, stats)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/ingest/upload` | Upload a file (PDF/text), auto-routed or forced to a bucket |
+| POST | `/api/ingest/text` | Ingest raw text |
+| POST | `/api/ingest/bulk` | Upload multiple files |
+| GET | `/api/ingest/status/{job_id}` | Job status (stage, progress, bucket decision, stats) |
 
-### Graph (all scoped by `bucket_id`)
-- `GET /api/graph/nodes` · `GET /api/graph/nodes/{id}` · `GET /api/graph/edges`
-- `GET /api/graph/subgraph?node_id=…&depth=N`
-- `GET /api/graph/stats?bucket_id=…`
+### Graph (scoped by `bucket_id`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/graph/nodes` | List nodes (filter by type/search) |
+| GET | `/api/graph/nodes/{id}` | Node + its relationships |
+| GET | `/api/graph/edges` | List relationships |
+| GET | `/api/graph/subgraph?node_id=…&depth=N` | N-hop neighbourhood |
+| GET | `/api/graph/stats?bucket_id=…` | Counts by entity/relationship type |
 
 ### Graph-QA
-- `POST /api/qa` — `{ bucket_id, question }` → grounded answer + evidence triples
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/qa` | `{ bucket_id, question }` → grounded answer + evidence triples |
 
 ---
 
@@ -174,25 +181,26 @@ knowledge-graph-application/
 │   │   │   ├── main.py          # FastAPI app + lifespan (DB init)
 │   │   │   ├── config.py        # settings (.env)
 │   │   │   ├── schemas.py       # Pydantic models
-│   │   │   ├── db/              # postgres.py (SQLAlchemy) + neo4j_client.py
-│   │   │   ├── services/        # llm, embeddings, documents (pdf/chunking)
-│   │   │   ├── agents/          # crew (CrewAI), ontology, context_router, graph_qa, tools
-│   │   │   ├── pipeline/        # LangGraph graph.py, state.py, persist.py
-│   │   │   ├── routers/         # buckets, documents, graph, ingest, qa
+│   │   │   ├── db/              # postgres.py (SQLAlchemy) · neo4j_client.py
+│   │   │   ├── services/        # llm · embeddings · documents (pdf/chunking)
+│   │   │   ├── agents/          # crew (CrewAI) · ontology · context_router · graph_qa · tools
+│   │   │   ├── pipeline/        # graph.py (LangGraph) · state.py · persist.py
+│   │   │   ├── routers/         # buckets · documents · graph · ingest · qa
 │   │   │   └── jobs.py          # background processing queue
 │   │   ├── requirements.txt
 │   │   └── .env.example
 │   └── web/                      # React frontend
 │       └── src/
-│           ├── lib/             # api client, types, BucketContext
+│           ├── lib/             # api client · types · BucketContext
 │           ├── components/      # BucketSelector
-│           └── pages/           # Dashboard, Explorer, Ask, Upload
-└── docker-compose.yml           # PostgreSQL + Neo4j
+│           └── pages/           # Dashboard · Explorer · Ask · Upload
+├── docs/                         # architecture.svg · bucket-routing.svg
+└── docker-compose.yml            # PostgreSQL + Neo4j
 ```
 
 ---
 
-## Key environment variables (`apps/server/.env`)
+## Configuration (`apps/server/.env`)
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -200,6 +208,7 @@ knowledge-graph-application/
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Neo4j connection | `bolt://localhost:7687` / `neo4j` / `password` |
 | `LLM_PROVIDER` | `openai` or `ollama` | `openai` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI access | — / `gpt-4o-mini` |
+| `OPENAI_EMBEDDING_MODEL` | Embedding model | `text-embedding-3-small` |
 | `BUCKET_MATCH_THRESHOLD` | Cosine similarity to append vs. create | `0.78` |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | Extraction chunking | `2000` / `200` |
 
@@ -207,11 +216,12 @@ knowledge-graph-application/
 
 ## Limitations & future work
 
-- In-process job queue (single instance) — swap for Redis/BullMQ-style workers for scale.
-- No authentication yet; add JWT + rate limiting for production.
-- Bucket routing relies on a similarity threshold that may need per-domain tuning.
-- No UI yet for merging/splitting buckets or re-routing a document between buckets.
-- Graph-QA is retrieval-grounded; a Cypher-generation path could broaden answerable questions.
+- **In-process job queue** (single instance) — swap for Redis + workers (Celery/RQ/BullMQ) to scale.
+- **No authentication** yet — add JWT + rate limiting before exposing publicly.
+- **Threshold-based routing** — `BUCKET_MATCH_THRESHOLD` may need per-domain tuning; could be learned.
+- **No bucket-management UI** — merging/splitting buckets or re-routing a document is future work.
+- **Graph-QA is retrieval-grounded** — a Cypher-generation path would broaden answerable questions.
+- **Status updates use polling** — Server-Sent Events would cut load at higher concurrency.
 
 ## License
 

@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 880" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowLight" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1100" height="880" fill="#ffffff"/>
+  <text x="550" y="36" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">Context-Bucket Knowledge Graph — High-Level Design</text>
+
+  <!-- ===================== FRONTEND ===================== -->
+  <rect x="60" y="56" width="980" height="96" rx="12" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="78" y="80" font-size="14" font-weight="700" fill="#4338ca">React Frontend &#183; TypeScript &#183; Vite &#183; React Flow</text>
+  <g font-size="13" fill="#312e81" text-anchor="middle">
+    <rect x="80" y="98" width="150" height="40" rx="8" fill="#ffffff" stroke="#6366f1"/><text x="155" y="123">Dashboard</text>
+    <rect x="250" y="98" width="150" height="40" rx="8" fill="#ffffff" stroke="#6366f1"/><text x="325" y="123">Explorer</text>
+    <rect x="420" y="98" width="180" height="40" rx="8" fill="#ffffff" stroke="#6366f1"/><text x="510" y="123">Ask (Graph-QA)</text>
+    <rect x="620" y="98" width="140" height="40" rx="8" fill="#ffffff" stroke="#6366f1"/><text x="690" y="123">Upload</text>
+    <rect x="780" y="98" width="240" height="40" rx="8" fill="#e0e7ff" stroke="#6366f1"/><text x="900" y="123">Bucket Selector</text>
+  </g>
+
+  <!-- frontend -> backend -->
+  <line x1="550" y1="152" x2="550" y2="190" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="562" y="177" font-size="12" fill="#475569">REST / JSON</text>
+
+  <!-- ===================== BACKEND ===================== -->
+  <rect x="60" y="192" width="980" height="372" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="78" y="216" font-size="14" font-weight="700" fill="#1d4ed8">FastAPI Backend &#183; Python</text>
+
+  <!-- routers -->
+  <g font-size="12" fill="#1e3a8a" text-anchor="middle" font-family="Menlo, Consolas, monospace">
+    <rect x="80"  y="228" width="150" height="34" rx="7" fill="#dbeafe" stroke="#3b82f6"/><text x="155" y="250">/api/buckets</text>
+    <rect x="246" y="228" width="160" height="34" rx="7" fill="#dbeafe" stroke="#3b82f6"/><text x="326" y="250">/api/documents</text>
+    <rect x="422" y="228" width="120" height="34" rx="7" fill="#dbeafe" stroke="#3b82f6"/><text x="482" y="250">/api/graph</text>
+    <rect x="558" y="228" width="120" height="34" rx="7" fill="#dbeafe" stroke="#3b82f6"/><text x="618" y="250">/api/ingest</text>
+    <rect x="694" y="228" width="110" height="34" rx="7" fill="#dbeafe" stroke="#3b82f6"/><text x="749" y="250">/api/qa</text>
+  </g>
+
+  <!-- pipeline -->
+  <rect x="80" y="280" width="860" height="264" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="96" y="302" font-size="13" font-weight="700" fill="#6d28d9">Ingestion Pipeline — LangGraph StateGraph</text>
+
+  <!-- pipeline nodes -->
+  <g font-size="14" font-weight="600" fill="#5b21b6" text-anchor="middle">
+    <rect x="96"  y="318" width="140" height="46" rx="9" fill="#ffffff" stroke="#8b5cf6"/><text x="166" y="346">prepare</text>
+    <rect x="262" y="318" width="140" height="46" rx="9" fill="#ffffff" stroke="#8b5cf6"/><text x="332" y="346">route</text>
+    <rect x="428" y="318" width="140" height="46" rx="9" fill="#ffffff" stroke="#8b5cf6"/><text x="498" y="346">ontology</text>
+    <rect x="594" y="318" width="140" height="46" rx="9" fill="#ffffff" stroke="#8b5cf6"/><text x="664" y="346">extract</text>
+    <rect x="760" y="318" width="140" height="46" rx="9" fill="#ffffff" stroke="#8b5cf6"/><text x="830" y="346">finalize</text>
+  </g>
+  <g stroke="#8b5cf6" stroke-width="2" marker-end="url(#arrow)">
+    <line x1="236" y1="341" x2="260" y2="341"/>
+    <line x1="402" y1="341" x2="426" y2="341"/>
+    <line x1="568" y1="341" x2="592" y2="341"/>
+    <line x1="734" y1="341" x2="758" y2="341"/>
+  </g>
+
+  <!-- agent tags under nodes -->
+  <g font-size="12" fill="#92400e" text-anchor="middle">
+    <rect x="86"  y="386" width="160" height="32" rx="7" fill="#fffbeb" stroke="#f59e0b"/><text x="166" y="406">Embed + Summarize</text>
+    <rect x="252" y="386" width="160" height="32" rx="7" fill="#fffbeb" stroke="#f59e0b"/><text x="332" y="406">Context-Router</text>
+    <rect x="418" y="386" width="160" height="32" rx="7" fill="#fffbeb" stroke="#f59e0b"/><text x="498" y="406">Ontology agent</text>
+    <rect x="752" y="386" width="170" height="32" rx="7" fill="#fffbeb" stroke="#f59e0b"/><text x="837" y="406">Signature + counts</text>
+  </g>
+
+  <!-- extract -> crew -->
+  <line x1="664" y1="364" x2="664" y2="430" stroke="#ec4899" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- CrewAI crew -->
+  <rect x="300" y="430" width="560" height="98" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="1.5"/>
+  <text x="580" y="452" text-anchor="middle" font-size="13" font-weight="700" fill="#be185d">CrewAI Extraction Crew (runs inside the extract step)</text>
+  <g font-size="13" fill="#9d174d" text-anchor="middle">
+    <rect x="320" y="466" width="150" height="44" rx="8" fill="#ffffff" stroke="#ec4899"/><text x="395" y="493">Extractor</text>
+    <rect x="505" y="466" width="150" height="44" rx="8" fill="#ffffff" stroke="#ec4899"/><text x="580" y="493">Resolver</text>
+    <rect x="690" y="466" width="150" height="44" rx="8" fill="#ffffff" stroke="#ec4899"/><text x="765" y="493">Validator</text>
+  </g>
+  <g stroke="#ec4899" stroke-width="2" marker-end="url(#arrow)">
+    <line x1="470" y1="488" x2="503" y2="488"/>
+    <line x1="655" y1="488" x2="688" y2="488"/>
+  </g>
+
+  <!-- backend -> data stores -->
+  <line x1="300" y1="564" x2="300" y2="618" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="150" y="600" font-size="12" fill="#475569">documents &#183; jobs &#183; provenance</text>
+  <line x1="760" y1="564" x2="760" y2="618" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="780" y="600" font-size="12" fill="#475569">entities + edges (per bucket)</text>
+  <!-- reads -->
+  <line x1="900" y1="618" x2="900" y2="566" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowLight)"/>
+  <text x="912" y="600" font-size="11" fill="#94a3b8">reads (graph, qa)</text>
+
+  <!-- ===================== DATA LAYER ===================== -->
+  <rect x="120" y="618" width="380" height="132" rx="10" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="140" y="644" font-size="15" font-weight="700" fill="#0e7490">PostgreSQL</text>
+  <g font-size="12.5" fill="#155e75">
+    <text x="140" y="670">&#8226; buckets — name, ontology, signature, counts</text>
+    <text x="140" y="694">&#8226; documents — status, progress, raw_text</text>
+    <text x="140" y="718">&#8226; jobs &#183; sources (edge → text provenance)</text>
+  </g>
+
+  <rect x="600" y="618" width="380" height="132" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="620" y="644" font-size="15" font-weight="700" fill="#047857">Neo4j &#183; Graph Database</text>
+  <g font-size="12.5" fill="#065f46" font-family="Menlo, Consolas, monospace">
+    <text x="620" y="672">(:Entity {bucket_id, type, name})</text>
+    <text x="620" y="696">-[:REL {type, confidence}]-&gt;(:Entity)</text>
+  </g>
+  <text x="620" y="722" font-size="12.5" fill="#065f46">scoped + deduped per context bucket</text>
+
+  <!-- ===================== LLM PROVIDER ===================== -->
+  <rect x="350" y="792" width="420" height="54" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="1.5"/>
+  <text x="560" y="824" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">LLM Provider — OpenAI or Ollama  (chat &#183; JSON &#183; embeddings)</text>
+  <!-- LLM elbow into backend -->
+  <polyline points="770,819 1060,819 1060,245 808,245" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowLight)"/>
+  <text x="1052" y="235" text-anchor="end" font-size="11" fill="#94a3b8">LLM calls (agents + crew)</text>
+</svg>
